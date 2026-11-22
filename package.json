@@ -9,6 +9,7 @@
     "lint": "eslint",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
+    "db:test-user": "tsx scripts/create-test-user.ts",
     "db:studio": "prisma studio"
   },
   "dependencies": {

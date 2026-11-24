@@ -14,6 +14,8 @@ import { buildMemoryContext } from "@/server/memory/memory-context.service";
 
 import { webSearch } from "@/server/search/web-search";
 
+import { processResearchEvidence } from "@/server/research/research-evidence.service";
+
 const orchestratorInputSchema = z.object({
   userId: z.string().min(1),
   conversationId: z.string().min(1).optional(),
@@ -182,6 +184,9 @@ export async function runChatOrchestrator(input: ChatOrchestratorInput) {
   let retrievedMessageCount = 0;
 
   const sources: EvidenceSource[] = [];
+  let researchResult: Awaited<
+    ReturnType<typeof processResearchEvidence>
+  > | null = null;
 
   // 6. Retrieve historical conversation memory when required.
   if (searchPlan.memorySearch.required) {
@@ -242,6 +247,32 @@ export async function runChatOrchestrator(input: ChatOrchestratorInput) {
     sources.push(...uniqueSources.values());
   }
 
+  if (
+    searchPlan.webSearch.required &&
+    sources.length > 0
+  ) {
+    researchResult = await processResearchEvidence({
+      userId,
+      conversationId: conversation.id,
+      topic: understoodQuery.topic.primaryTopic,
+      entities: understoodQuery.topic.entities,
+      sources: sources.map((source) => ({
+        title: source.title,
+        url: source.url,
+        domain: source.domain,
+        content: source.content,
+        publishedDate: source.publishedDate,
+      })),
+    });
+
+    historicalContext = [
+      historicalContext ?? "",
+      "",
+      "STRUCTURED HISTORICAL FACT COMPARISONS:",
+      JSON.stringify(researchResult.comparisons, null, 2),
+    ].join("\n");
+  }
+
   // 8. Generate the final response using the available evidence.
   const answer = await generateFinalAnswer({
     question: message,
@@ -265,6 +296,8 @@ export async function runChatOrchestrator(input: ChatOrchestratorInput) {
       retrievedMessages: retrievedMessageCount,
       sourceCount: sources.length,
       sourceUrls: sources.map((source) => source.url),
+      researchSessionId: researchResult?.researchSessionId ?? null,
+      extractedFactCount: researchResult?.extractedFactCount ?? 0,
     },
   });
 
@@ -281,5 +314,14 @@ export async function runChatOrchestrator(input: ChatOrchestratorInput) {
       retrievedMessages: retrievedMessageCount,
     },
     sources,
+    research: researchResult
+      ? {
+          researchSessionId: researchResult.researchSessionId,
+          entityCount: researchResult.entities.length,
+          sourceCount: researchResult.sources.length,
+          extractedFactCount: researchResult.extractedFactCount,
+          comparisons: researchResult.comparisons,
+        }
+      : null,
   };
 }
